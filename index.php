@@ -5,7 +5,7 @@
  * Software Architect
  */
 
-require_once __DIR__ . '/config.php'; // Veritabanı bağlantı bilgilerini burada tanımlayın
+require_once __DIR__ . '/config.php'; 
 
 interface DatabaseInterface
 {
