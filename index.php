@@ -49,7 +49,6 @@ class PDODatabase implements DatabaseInterface
 
 $database = new PDODatabase($DB_DSN, $DB_USER, $DB_PASS, $DB_OPTIONS);
 
-
 function calculateDistance($lat1, $lon1, $lat2, $lon2)
 {
     $earthRadius = 6371; // Kilometre cinsinden dünya yarıçapı
@@ -65,6 +64,7 @@ function calculateDistance($lat1, $lon1, $lat2, $lon2)
 
     return $earthRadius * $c;
 }
+
 function getCouriers(DatabaseInterface $db)
 {
     $query = "SELECT id, latitude, longitude FROM couriers WHERE active_package = 1";
@@ -85,15 +85,14 @@ function getOrders(DatabaseInterface $db)
     }
 }
 
-
 function findBestCourierForOrder($order, $couriers)
 {
     if (empty($couriers)) {
         handleError("Kuryeler listesi boş.");
     }
 
-    $validCouriers = [];
     $shortestDistance = PHP_INT_MAX;
+    $bestCourier = null;
 
     foreach ($couriers as $courier) {
         $distance = calculateDistance(
@@ -105,19 +104,16 @@ function findBestCourierForOrder($order, $couriers)
 
         if ($distance < $shortestDistance) {
             $shortestDistance = $distance;
-            $validCouriers = [$courier];
-        } elseif ($distance == $shortestDistance) {
-            $validCouriers[] = $courier;
+            $bestCourier = $courier;
         }
     }
 
-    if (empty($validCouriers)) {
+    if ($bestCourier === null) {
         handleError("Uygun kurye bulunamadı.");
     }
 
-    return $validCouriers[0];
+    return $bestCourier;
 }
-
 
 function cacheData($key, $data)
 {
@@ -129,7 +125,6 @@ function cacheData($key, $data)
         file_put_contents($cacheFile, json_encode($data));
     }
 }
-
 
 function getCache($key)
 {
@@ -147,10 +142,9 @@ function handleError($message)
     exit();
 }
 
-
 function validateCoordinate($coordinate)
 {
-    return is_numeric($coordinate) && $coordinate >= -90 && $coordinate <= 90;
+    return filter_var($coordinate, FILTER_VALIDATE_FLOAT) !== false && $coordinate >= -90 && $coordinate <= 90;
 }
 
 function sanitizeInput($input)
