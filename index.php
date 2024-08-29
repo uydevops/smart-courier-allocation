@@ -5,7 +5,7 @@
  * Software Architect
  */
 
-require_once __DIR__ . '/config.php'; 
+require_once __DIR__ . '/config.php';
 
 interface DatabaseInterface
 {
@@ -47,11 +47,96 @@ class PDODatabase implements DatabaseInterface
     }
 }
 
-$database = new PDODatabase($DB_DSN, $DB_USER, $DB_PASS, $DB_OPTIONS);
+class CacheManager
+{
+    private $cacheDir;
+    private $cacheLifetime;
+
+    public function __construct($cacheDir, $cacheLifetime = 3600)
+    {
+        $this->cacheDir = $cacheDir;
+        $this->cacheLifetime = $cacheLifetime;
+    }
+
+    public function cacheData($key, $data)
+    {
+        $cacheFile = $this->getCacheFilePath($key);
+        if (time() - @filemtime($cacheFile) > $this->cacheLifetime) {
+            file_put_contents($cacheFile, json_encode($data));
+        }
+    }
+
+    public function getCache($key)
+    {
+        $cacheFile = $this->getCacheFilePath($key);
+        if (file_exists($cacheFile)) {
+            return json_decode(file_get_contents($cacheFile), true);
+        }
+        return null;
+    }
+
+    private function getCacheFilePath($key)
+    {
+        return $this->cacheDir . DIRECTORY_SEPARATOR . $key . '.json';
+    }
+}
+
+class CourierService
+{
+    private $db;
+    private $cacheManager;
+
+    public function __construct(DatabaseInterface $db, CacheManager $cacheManager)
+    {
+        $this->db = $db;
+        $this->cacheManager = $cacheManager;
+    }
+
+    public function getCouriers()
+    {
+        $couriers = $this->cacheManager->getCache('couriers');
+        if ($couriers === null) {
+            $query = "SELECT id, latitude, longitude FROM couriers WHERE active_package = 1";
+            $couriers = $this->db->fetchAll($query);
+            $this->cacheManager->cacheData('couriers', $couriers);
+        }
+        return $couriers;
+    }
+
+    public function findBestCourierForOrder($order, $couriers)
+    {
+        if (empty($couriers)) {
+            throw new Exception("Kuryeler listesi boş.");
+        }
+
+        $shortestDistance = PHP_INT_MAX;
+        $bestCourier = null;
+
+        foreach ($couriers as $courier) {
+            $distance = calculateDistance(
+                $order['latitude'],
+                $order['longitude'],
+                $courier['latitude'],
+                $courier['longitude']
+            );
+
+            if ($distance < $shortestDistance) {
+                $shortestDistance = $distance;
+                $bestCourier = $courier;
+            }
+        }
+
+        if ($bestCourier === null) {
+            throw new Exception("Uygun kurye bulunamadı.");
+        }
+
+        return $bestCourier;
+    }
+}
 
 function calculateDistance($lat1, $lon1, $lat2, $lon2)
 {
-    $earthRadius = 6371; // Kilometre cinsinden dünya yarıçapı
+    $earthRadius = 6371;
 
     $dLat = deg2rad($lat2 - $lat1);
     $dLon = deg2rad($lon2 - $lon1);
@@ -65,74 +150,9 @@ function calculateDistance($lat1, $lon1, $lat2, $lon2)
     return $earthRadius * $c;
 }
 
-function getCouriers(DatabaseInterface $db)
+function validateCoordinate($coordinate)
 {
-    $query = "SELECT id, latitude, longitude FROM couriers WHERE active_package = 1";
-    try {
-        return $db->fetchAll($query);
-    } catch (\PDOException $e) {
-        handleError("Kuryeler alınamadı: " . $e->getMessage());
-    }
-}
-
-function getOrders(DatabaseInterface $db)
-{
-    $query = "SELECT id, latitude, longitude, package_type FROM orders";
-    try {
-        return $db->fetchAll($query);
-    } catch (\PDOException $e) {
-        handleError("Siparişler alınamadı: " . $e->getMessage());
-    }
-}
-
-function findBestCourierForOrder($order, $couriers)
-{
-    if (empty($couriers)) {
-        handleError("Kuryeler listesi boş.");
-    }
-
-    $shortestDistance = PHP_INT_MAX;
-    $bestCourier = null;
-
-    foreach ($couriers as $courier) {
-        $distance = calculateDistance(
-            $order['latitude'],
-            $order['longitude'],
-            $courier['latitude'],
-            $courier['longitude']
-        );
-
-        if ($distance < $shortestDistance) {
-            $shortestDistance = $distance;
-            $bestCourier = $courier;
-        }
-    }
-
-    if ($bestCourier === null) {
-        handleError("Uygun kurye bulunamadı.");
-    }
-
-    return $bestCourier;
-}
-
-function cacheData($key, $data)
-{
-    $cacheFile = __DIR__ . "/cache/{$key}.json";
-    $cacheLifetime = 3600; // Önbelleğin geçerlilik süresi (saniye)
-    $cacheTime = file_exists($cacheFile) ? filemtime($cacheFile) : 0;
-
-    if (time() - $cacheTime > $cacheLifetime) {
-        file_put_contents($cacheFile, json_encode($data));
-    }
-}
-
-function getCache($key)
-{
-    $cacheFile = __DIR__ . "/cache/{$key}.json";
-    if (file_exists($cacheFile)) {
-        return json_decode(file_get_contents($cacheFile), true);
-    }
-    return null;
+    return filter_var($coordinate, FILTER_VALIDATE_FLOAT) !== false && $coordinate >= -90 && $coordinate <= 90;
 }
 
 function handleError($message)
@@ -142,38 +162,31 @@ function handleError($message)
     exit();
 }
 
-function validateCoordinate($coordinate)
+function main(DatabaseInterface $database, CacheManager $cacheManager)
 {
-    return filter_var($coordinate, FILTER_VALIDATE_FLOAT) !== false && $coordinate >= -90 && $coordinate <= 90;
-}
+    try {
+        $courierService = new CourierService($database, $cacheManager);
+        $couriers = $courierService->getCouriers();
 
-function sanitizeInput($input)
-{
-    return htmlspecialchars(strip_tags($input));
-}
+        $orders = $database->fetchAll("SELECT id, latitude, longitude, package_type FROM orders");
 
-try {
-    $couriers = getCache('couriers');
-    if ($couriers === null) {
-        $couriers = getCouriers($database);
-        cacheData('couriers', $couriers);
-    }
+        foreach ($orders as $order) {
+            if (!validateCoordinate($order['latitude']) || !validateCoordinate($order['longitude'])) {
+                handleError("Geçersiz koordinat verisi.");
+            }
 
-    $orders = getOrders($database);
+            $bestCourier = $courierService->findBestCourierForOrder($order, $couriers);
 
-    foreach ($orders as $order) {
-        if (!validateCoordinate($order['latitude']) || !validateCoordinate($order['longitude'])) {
-            handleError("Geçersiz koordinat verisi.");
+            if ($bestCourier) {
+                echo "Sipariş ID: {$order['id']} için en yakın kurye ID: {$bestCourier['id']} seçilmiştir.<br>";
+            } else {
+                echo "Sipariş ID: {$order['id']} için uygun kurye bulunamadı.<br>";
+            }
         }
-
-        $bestCourier = findBestCourierForOrder($order, $couriers);
-
-        if ($bestCourier) {
-            echo "Sipariş ID: {$order['id']} için en yakın kurye ID: {$bestCourier['id']} seçilmiştir.<br>";
-        } else {
-            echo "Sipariş ID: {$order['id']} için uygun kurye bulunamadı.<br>";
-        }
+    } catch (Exception $e) {
+        handleError("Bir hata oluştu: " . $e->getMessage());
     }
-} catch (Exception $e) {
-    handleError("Bir hata oluştu: " . $e->getMessage());
 }
+
+$cacheManager = new CacheManager(__DIR__ . '/cache');
+main($database, $cacheManager);
