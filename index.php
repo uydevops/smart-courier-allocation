@@ -11,18 +11,19 @@ interface DatabaseInterface
 {
     public function query($sql, $params = []);
     public function fetchAll($sql, $params = []);
+    public function fetch($sql, $params = []);
 }
 
 class PDODatabase implements DatabaseInterface
 {
     private $pdo;
 
-    public function __construct($dsn, $user, $pass, $options)
+    public function __construct($dsn, $user, $pass, $options = [])
     {
         try {
             $this->pdo = new PDO($dsn, $user, $pass, $options);
         } catch (\PDOException $e) {
-            $this->handleError("Veritabanı bağlantısı kurulamadı: " . $e->getMessage());
+            $this->handleError("Veritabanı bağlantısı başarısız: " . $e->getMessage());
         }
     }
 
@@ -37,6 +38,12 @@ class PDODatabase implements DatabaseInterface
     {
         $stmt = $this->query($sql, $params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function fetch($sql, $params = [])
+    {
+        $stmt = $this->query($sql, $params);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
     private function handleError($message)
@@ -77,7 +84,7 @@ class CacheManager
 
     private function getCacheFilePath($key)
     {
-        return $this->cacheDir . DIRECTORY_SEPARATOR . $key . '.json';
+        return $this->cacheDir . DIRECTORY_SEPARATOR . md5($key) . '.json';
     }
 }
 
@@ -152,7 +159,7 @@ function calculateDistance($lat1, $lon1, $lat2, $lon2)
 
 function validateCoordinate($coordinate)
 {
-    return filter_var($coordinate, FILTER_VALIDATE_FLOAT) !== false && $coordinate >= -90 && $coordinate <= 90;
+    return is_numeric($coordinate) && $coordinate >= -90 && $coordinate <= 90;
 }
 
 function handleError($message)
@@ -188,5 +195,20 @@ function main(DatabaseInterface $database, CacheManager $cacheManager)
     }
 }
 
+// Veritabanı bağlantı bilgileri
+$dsn = "mysql:host=localhost;dbname=veritabani;charset=utf8";
+$user = "kullanici";
+$pass = "sifre";
+$options = [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+];
+
+// Veritabanı nesnesi oluşturulması
+$database = new PDODatabase($dsn, $user, $pass, $options);
+
+// CacheManager nesnesi oluşturulması
 $cacheManager = new CacheManager(__DIR__ . '/cache');
+
+// Ana fonksiyon çağrısı
 main($database, $cacheManager);
