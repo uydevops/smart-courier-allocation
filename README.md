@@ -22,10 +22,3 @@ The Courier Assignment System is a PHP-based application designed to efficiently
 - PDO Extension
 - A web server (e.g., Apache, Nginx)
 
-## Setup
-
-1. **Clone the Repository**
-
-   ```bash
-   git clone https://github.com/yourusername/courier-assignment-system.git
-   cd courier-assignment-system
