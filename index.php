@@ -195,7 +195,6 @@ function main(DatabaseInterface $database, CacheManager $cacheManager)
     }
 }
 
-// Veritabanı bağlantı bilgileri
 $dsn = "mysql:host=localhost;dbname=veritabani;charset=utf8";
 $user = "kullanici";
 $pass = "sifre";
@@ -204,11 +203,8 @@ $options = [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ];
 
-// Veritabanı nesnesi oluşturulması
 $database = new PDODatabase($dsn, $user, $pass, $options);
 
-// CacheManager nesnesi oluşturulması
 $cacheManager = new CacheManager(__DIR__ . '/cache');
 
-// Ana fonksiyon çağrısı
 main($database, $cacheManager);
